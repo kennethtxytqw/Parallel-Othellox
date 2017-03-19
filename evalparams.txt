@@ -1,4 +1,4 @@
-MaxDepth: 10 
+MaxDepth: 15
 MaxBoards: 10000000 
 CornerValue: 42 
 EdgeValue: 4 
