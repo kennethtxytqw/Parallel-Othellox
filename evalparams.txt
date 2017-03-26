@@ -1,4 +1,5 @@
-MaxDepth: 15
+MaxDepth: 10
 MaxBoards: 10000000 
+MaxPlayer: BLACK
 CornerValue: 42 
 EdgeValue: 4 

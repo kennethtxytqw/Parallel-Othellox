@@ -43,26 +43,31 @@ int height;
 int ply;
 int maxPlayer;
 
-void saveRunResult(uint * bestMovesArr, int bestMovesCount);
-uint c_to_n(char c);
-uint * to2d(uint i, int width);
-int to1d(int x, int y, int width);
+
+
+typedef struct {
+	uint** board; //Using uchar because it is the smallest suitable data type 
+	uint player;
+	uint height;
+	uint width;
+	uint maxPlayer;
+}Game;
+
+unsigned int * to2d(unsigned int i, int width);
+unsigned int c_to_n(char c);
 char * mystrsep(char ** stringp, const char * delim);
-int availableMoves(uint ** boardPtr, int * movesPtr, int player);
-int countFlips(int x, int y, uint ** boardPtr, int player);
+int countFlips(int x, int y, Game * gptr);
+Game * newGame(uint player, uint height, uint width, uint ** board);
 uint ** createStandardBoard();
 uint ** createBoard(int width, int height, int player, char * whiteStrPtr, char * blackStrPtr);
-int solve(uint ** boardPtr, int ply, uint * bestMovesArr);
-int playMax(uint ** boardPtr, int ply);
-int playMin(uint ** boardPtr, int ply);
-int evaluate(uint ** boardPtr);
-uint ** makeMove(uint ** boardPtr, uint nextMove, uint player);
-void placePiece(uint ** boardPtr, uint player, int x, int y);
-uint ** duplicateBoard(uint ** boardPtr);
-void freeBoard(uint ** boardPtr);
+int playMax(Game * gptr, int ply);
+int playMin(Game * gptr, int ply);
+int evaluate(Game * gptr);
+Game * makeMove(Game * gptr, uint nextMove);
+void placePiece(Game * gptr, uint player, int x, int y);
+Game * duplicateGame(Game * gptr);
+void freeGame(Game * gptr);
 void printMovesArr(uint * MovesArr, uint count, int width);
-void fprintMovesArr(FILE * ofp, uint * MovesArr, uint count, int width);
-void readInputs(int argc, char ** argv);
 
 uint c_to_n(char c)
 {
@@ -79,7 +84,7 @@ uint c_to_n(char c)
 }
 
 uint* to2d(uint i, int width) {
-	uint* iarr = malloc(sizeof(uint)*2);
+	uint* iarr = (uint*)malloc(sizeof(uint)*2);
 	uint x = i%width;
 	uint y = i / width;
 	iarr[0] = x;
@@ -111,12 +116,12 @@ char* mystrsep(char** stringp, const char* delim)
 	return start;
 }
 
-int availableMoves(uint** boardPtr, int* movesPtr, int player){
+int availableMoves(Game* gptr, int* movesPtr){
 	int i = 0;
-	for(int y=0; y<height; y++){
-		for(int x=0; x<width; x++){
-			if(countFlips(x,y,boardPtr,player)>0){
-				movesPtr[i]=to1d(x,y,width);
+	for(int y=0; y<gptr->height; y++){
+		for(int x=0; x<gptr->width; x++){
+			if(countFlips(x,y,gptr)>0){
+				movesPtr[i]=to1d(x,y,gptr->width);
 				i++;
 				//printf("%c%d is a valid move\n", alphabets[x],y);
 			}
@@ -125,35 +130,36 @@ int availableMoves(uint** boardPtr, int* movesPtr, int player){
 	return i;
 }
 
-int countFlips(int x, int y, uint** boardPtr, int player){
+int countFlips(int x, int y, Game* gptr){
 	// if the box is not EMPTY then return 0 flips which is an invalid move
-	if (boardPtr[x][y] != EMPTY) {
+	if (gptr->board[x][y] != EMPTY) {
 		return 0;
 	}
 	int flips=0;
 	int counter=0;
+	uint** board = gptr->board;
 	
 	// Count right flips
-	for(int i=x+1;i<width;++i){
-		if(boardPtr[i][y]==player){
+	for(int i=x+1;i<gptr->width;++i){
+		if(board[i][y]==gptr->player){
 			flips += counter;
 			break;
 		}
-		if(boardPtr[i][y]==EMPTY){
+		if(board[i][y]==EMPTY){
 			break;
 		}
-		//printf("Can flip at %d-%d for %d vs %d\n", i,y, boardPtr[i][y] , gptr->player);
+		//printf("Can flip at %d-%d for %d vs %d\n", i,y, board[i][y] , gptr->player);
 		counter++;
 	}
 	counter=0;
 
 	//Count left flips
 	for(int i=x-1;i>=0;--i){
-		if(boardPtr[i][y]==player){
+		if(board[i][y]==gptr->player){
 			flips += counter;
 			break;
 		}
-		if(boardPtr[i][y]==EMPTY){
+		if(board[i][y]==EMPTY){
 			break;
 		}
 		counter++;
@@ -161,12 +167,12 @@ int countFlips(int x, int y, uint** boardPtr, int player){
 	counter=0;
 
 	//Count top flips
-	for(int j=y+1;j<height;j++){
-		if(boardPtr[x][j]==player){
+	for(int j=y+1;j<gptr->height;j++){
+		if(board[x][j]==gptr->player){
 			flips += counter;
 			break;
 		}
-		if(boardPtr[x][j]==EMPTY){
+		if(board[x][j]==EMPTY){
 			break;
 		}
 		counter++;
@@ -175,11 +181,11 @@ int countFlips(int x, int y, uint** boardPtr, int player){
 
 	//Count bottom flips
 	for(int j=y-1;j>=0;j--){
-		if(boardPtr[x][j]==player){
+		if(board[x][j]==gptr->player){
 			flips += counter;
 			break;
 		}
-		if(boardPtr[x][j]==EMPTY){
+		if(board[x][j]==EMPTY){
 			break;
 		}
 		counter++;
@@ -187,12 +193,12 @@ int countFlips(int x, int y, uint** boardPtr, int player){
 	counter = 0;
 
 	//Count top right flips
-	for (int i = 1; i + x < width && i + y < height; i++) {
-		if (boardPtr[x + i][y + i] == player) {
+	for (int i = 1; i + x < gptr->width && i + y < gptr->height; i++) {
+		if (board[x + i][y + i] == gptr->player) {
 			flips += counter;
 			break;
 		}
-		if (boardPtr[x + i][y + i] == EMPTY) {
+		if (board[x + i][y + i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -201,11 +207,11 @@ int countFlips(int x, int y, uint** boardPtr, int player){
 
 	//Count bottom left flips
 	for (int i = 1; x-i >=0 && y-i >=0; i++) {
-		if (boardPtr[x - i][y - i] == player) {
+		if (board[x - i][y - i] == gptr->player) {
 			flips += counter;
 			break;
 		}
-		if (boardPtr[x - i][y - i] == EMPTY) {
+		if (board[x - i][y - i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -213,12 +219,12 @@ int countFlips(int x, int y, uint** boardPtr, int player){
 	counter = 0;
 
 	//Count top left flips
-	for (int i = 1; x-i >= 0 && i + y <height; i++) {
-		if (boardPtr[x - i][y + i] == player) {
+	for (int i = 1; x-i >= 0 && i + y <gptr->height; i++) {
+		if (board[x - i][y + i] == gptr->player) {
 			flips += counter;
 			break;
 		}
-		if (boardPtr[x - i][y + i] == EMPTY) {
+		if (board[x - i][y + i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -226,12 +232,12 @@ int countFlips(int x, int y, uint** boardPtr, int player){
 	counter = 0;
 
 	//Count bottom right flips
-	for (int i = 1; x + i <width && y-i >= 0; i++) {
-		if (boardPtr[x + i][y - i] == player) {
+	for (int i = 1; x + i <gptr->width && y-i >= 0; i++) {
+		if (board[x + i][y - i] == gptr->player) {
 			flips += counter;
 			break;
 		}
-		if (boardPtr[x + i][y - i] == EMPTY) {
+		if (board[x + i][y - i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -241,31 +247,42 @@ int countFlips(int x, int y, uint** boardPtr, int player){
 	return flips;
 }
 
+Game* newGame(uint player, uint height, uint width, uint** board){
+	Game* gptr;
+	gptr = (Game*) malloc(sizeof(Game));
+	gptr->board = board; //(uint**) malloc(sizeof(uint)*height*width);
+	gptr->height = height;
+	gptr->width = width;
+	gptr->player = player;
+	gptr->maxPlayer = player;
+	return gptr;
+} 
+
 
 uint** createStandardBoard(){
-	printf("Starting boardPtr creation\n");
-	uint** boardPtr = malloc(sizeof(uint*)*SSIZE);
+	printf("Starting board creation\n");
+	uint** board = (uint**) malloc(sizeof(uint*)*SSIZE);
 	for(int i =0; i<SSIZE; i++){
-		boardPtr[i]= malloc(sizeof(uint)*SSIZE);
+		board[i]= (uint*) malloc(sizeof(uint)*SSIZE);
 	}
 	for (int i = 0; i < SSIZE; i++) {
 		for (int j = 0; j < SSIZE; j++) {
-			boardPtr[i][j] = 0;
+			board[i][j] = 0;
 		}
 	}
-	boardPtr[4][4]= WHITE;
-	boardPtr[5][5]=WHITE;
-	boardPtr[5][4]=BLACK;
-	boardPtr[4][5]=BLACK;
-	return boardPtr;
+	board[4][4]= WHITE;
+	board[5][5]=WHITE;
+	board[5][4]=BLACK;
+	board[4][5]=BLACK;
+	return board;
 }
 
 uint** createBoard(int width, int height, int player, char* whiteStrPtr, char* blackStrPtr) {
-	printf("Starting boardPtr creation\n");
+	printf("Starting board creation\n");
 	char* token;
 	//This way i make sure i create my board such that the data is contiguous
-	uint** boardPtr = malloc(sizeof(uint*)*width);
-	uint* board = malloc(sizeof(uint)*height*width);
+	uint** boardPtr = (uint**)malloc(sizeof(uint*)*width);
+	uint* board = (uint*)malloc(sizeof(uint)*height*width);
 	for (int i = 0; i<width; i++) {
 		boardPtr[i] = &board[i*height];
 	}
@@ -287,15 +304,15 @@ uint** createBoard(int width, int height, int player, char* whiteStrPtr, char* b
 	return boardPtr;
 }
 
-int solve(uint** boardPtr, int ply, uint* bestMovesArr) {
+int solve(Game* gptr, int ply, uint* bestMovesArr) {
 	if (ply == 0) {
 		printf( "ply == 0");
 		return 0;
 	}
 	int value = -INT_MAX;
-	uint* movesArr = malloc(height*width * sizeof(uint));
+	uint* movesArr = (uint*)malloc(gptr->height*gptr->width * sizeof(uint));
 	
-	int numMoves = availableMoves(boardPtr, movesArr,maxPlayer);
+	int numMoves = availableMoves(gptr, movesArr);
 	if (numMoves == 0) {
 		printf("No available moves");
 		return 0;
@@ -303,8 +320,8 @@ int solve(uint** boardPtr, int ply, uint* bestMovesArr) {
 	int temp;
 	int bestMovesCount;
 	for (int i = 0; i < numMoves; i++) {
-		uint** newBoard = makeMove(boardPtr, movesArr[i], maxPlayer);
-		temp = playMin(newBoard, ply - 1);
+		Game* nextGame = makeMove(gptr, movesArr[i]);
+		temp = playMin(nextGame, ply - 1);
 		if (temp > value) {
 			value = temp;
 			bestMovesCount = 0;
@@ -317,31 +334,32 @@ int solve(uint** boardPtr, int ply, uint* bestMovesArr) {
 			bestMovesCount++;
 			printf("Move %d has %d\n", movesArr[i], temp);
 		}
-		freeBoard(newBoard);
+		freeGame(nextGame);
 	}
 	free(movesArr);
 	return bestMovesCount;
 }
 
-int playMax(uint** boardPtr, int ply) {
+int playMax(Game* gptr, int ply) {
 	if (ply == 0||numBoards==maxBoards) {
-		return evaluate(boardPtr);
+		return evaluate(gptr);
 	}
 	else {
 		int value = -INT_MAX;
-		uint* movesArr = malloc(height*width*sizeof(uint));
-		int numMoves = availableMoves(boardPtr, movesArr,maxPlayer);
+		uint* movesArr = (uint*)malloc(gptr->height*gptr->width*sizeof(uint));
+		int numMoves = availableMoves(gptr, movesArr);
 		if (numMoves == 0) {
-			return playMin(boardPtr, ply - 1);
+			gptr->player = gptr->player++ % 2;
+			return playMin(gptr, ply - 1);
 		}
 		int temp;
 		for (int i = 0; i < numMoves; i++) {
-			uint** newBoard = makeMove(boardPtr, movesArr[i],maxPlayer);
-			temp = playMin(newBoard, ply - 1);
+			Game* nextGame = makeMove(gptr, movesArr[i]);
+			temp = playMin(nextGame, ply - 1);
 			if (temp > value) {
 				value = temp;
 			}
-			freeBoard(newBoard);
+			freeGame(nextGame);
 		}
 		//printf("Done Max\n");
 		free(movesArr);
@@ -349,25 +367,26 @@ int playMax(uint** boardPtr, int ply) {
 	}
 }
 
-int playMin(uint** boardPtr, int ply) {
+int playMin(Game* gptr, int ply) {
 	if (ply == 0 || numBoards == maxBoards) {
-		return evaluate(boardPtr);
+		return evaluate(gptr);
 	}
 	else {
 		int value = INT_MAX;
-		uint* movesArr = malloc(height*width * sizeof(uint));
-		int numMoves = availableMoves(boardPtr, movesArr, !maxPlayer);
+		uint* movesArr = (uint*)malloc(gptr->height*gptr->width * sizeof(uint));
+		int numMoves = availableMoves(gptr, movesArr);
 		if (numMoves == 0) {
-			return playMax(boardPtr, ply - 1);
+			gptr->player = gptr->player++%2;
+			return playMax(gptr, ply - 1);
 		}
 		int temp;
 		for (int i = 0; i < numMoves; i++) {
-			uint** newBoard = makeMove(boardPtr, movesArr[i],!maxPlayer);
-			temp = playMax(newBoard, ply - 1);
+			Game* nextGame = makeMove(gptr, movesArr[i]);
+			temp = playMax(nextGame, ply - 1);
 			if (temp < value) {
 				value = temp;
 			}
-			freeBoard(newBoard);
+			freeGame(nextGame);
 		}
 		//printf("Done Min\n");
 		free(movesArr);
@@ -375,58 +394,67 @@ int playMin(uint** boardPtr, int ply) {
 	}
 }
 
-int evaluate(uint** boardPtr) {
+int evaluate(Game* gptr) {
 	int score = 0;
-	for (int i = 0; i < width; i++) {
-		for (int j = 0; j < height; j++) {
-			if (boardPtr[i][j] == maxPlayer) {
+	for (int i = 0; i < gptr->width; i++) {
+		for (int j = 0; j < gptr->height; j++) {
+			if (gptr->board[i][j] == gptr->maxPlayer) {
 				score++;
 			}
-			//printf("%d-%d is %d\n", i, j, gptr->boardPtr[i][j]);
+			//printf("%d-%d is %d\n", i, j, gptr->board[i][j]);
 		}
 	}
 
 	return score;
 }
 
-uint** makeMove(uint** boardPtr, uint nextMove, uint player) {
-	uint* move = to2d(nextMove, width);
+Game* makeMove(Game* gptr, uint nextMove) {
+	uint* move = to2d(nextMove, gptr->width);
 	uint x = move[0];
 	uint y = move[1];
-	uint** newBoardPtr = duplicateBoard(boardPtr);
-	
-	placePiece(newBoardPtr, player, x, y);
+	Game* ngptr = duplicateGame(gptr);
+	if (gptr->player == BLACK) {
+		
+		placePiece(ngptr, BLACK, x, y);
+		ngptr->player = WHITE;
+	}
+	else {
+		
+		placePiece(ngptr, WHITE, x, y);
+		ngptr->player = BLACK;
+	}
 	numBoards++;
 	free(move);
-	return newBoardPtr;
+	return ngptr;
 }
 
-void placePiece(uint** boardPtr, uint player, int x, int y) {
+void placePiece(Game* gptr, uint player, int x, int y) {
+	uint** board = gptr->board;
 	int counter = 0;
-	for (int i = x + 1; i<width; ++i) {
-		if (boardPtr[i][y] == player) {
+	for (int i = x + 1; i<gptr->width; ++i) {
+		if (board[i][y] == gptr->player) {
 			for (int j = 0; j <= counter; j++) {
-				boardPtr[x+j][y] = player;
+				board[x+j][y] = gptr->player;
 			}
 			break;
 		}
-		if (boardPtr[i][y] == EMPTY) {
+		if (board[i][y] == EMPTY) {
 			break;
 		}
-		//printf("Can flip at %d-%d for %d vs %d\n", i,y, boardPtr[i][y] , gptr->player);
+		//printf("Can flip at %d-%d for %d vs %d\n", i,y, board[i][y] , gptr->player);
 		counter++;
 	}
 	counter = 0;
 
 	//left flips
 	for (int i = x - 1; i >= 0; --i) {
-		if (boardPtr[i][y] == player) {
+		if (board[i][y] == gptr->player) {
 			for (int j = 0; j <= counter; j++) {
-				boardPtr[x-j][y] = player;
+				board[x-j][y] = gptr->player;
 			}
 			break;
 		}
-		if (boardPtr[i][y] == EMPTY) {
+		if (board[i][y] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -434,14 +462,14 @@ void placePiece(uint** boardPtr, uint player, int x, int y) {
 	counter = 0;
 
 	// top flips
-	for (int i = y + 1; i<height; i++) {
-		if (boardPtr[x][i] == player) {
+	for (int i = y + 1; i<gptr->height; i++) {
+		if (board[x][i] == gptr->player) {
 			for (int j = 0; j <= counter; j++) {
-				boardPtr[x][y+j] = player;
+				board[x][y+j] = gptr->player;
 			}
 			break;
 		}
-		if (boardPtr[x][i] == EMPTY) {
+		if (board[x][i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -450,13 +478,13 @@ void placePiece(uint** boardPtr, uint player, int x, int y) {
 
 	// bottom flips
 	for (int i = y - 1; i >= 0; i--) {
-		if (boardPtr[x][i] == player) {
+		if (board[x][i] == gptr->player) {
 			for (int j = 0; j <= counter; j++) {
-				boardPtr[x][y - j] = player;
+				board[x][y - j] = gptr->player;
 			}
 			break;
 		}
-		if (boardPtr[x][i] == EMPTY) {
+		if (board[x][i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -464,14 +492,14 @@ void placePiece(uint** boardPtr, uint player, int x, int y) {
 	counter = 0;
 
 	// top right flips
-	for (int i = 1; i + x < width && i + y < height; i++) {
-		if (boardPtr[x + i][y + i] == player) {
+	for (int i = 1; i + x < gptr->width && i + y < gptr->height; i++) {
+		if (board[x + i][y + i] == gptr->player) {
 			for (int j = 0; j <= counter; j++) {
-				boardPtr[x +j][y + j] = player;
+				board[x +j][y + j] = gptr->player;
 			}
 			break;
 		}
-		if (boardPtr[x + i][y + i] == EMPTY) {
+		if (board[x + i][y + i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -480,13 +508,13 @@ void placePiece(uint** boardPtr, uint player, int x, int y) {
 
 	// bottom left flips
 	for (int i = 1; x - i >= 0 && y - i >= 0; i++) {
-		if (boardPtr[x - i][y - i] == player) {
+		if (board[x - i][y - i] == gptr->player) {
 			for (int j = 0; j <= counter; j++) {
-				boardPtr[x  - j][y - j] = player;
+				board[x  - j][y - j] = gptr->player;
 			}
 			break;
 		}
-		if (boardPtr[x - i][y - i] == EMPTY) {
+		if (board[x - i][y - i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -494,14 +522,14 @@ void placePiece(uint** boardPtr, uint player, int x, int y) {
 	counter = 0;
 
 	// top left flips
-	for (int i = 1; x - i >= 0 && i + y <height; i++) {
-		if (boardPtr[x - i][y + i] == player) {
+	for (int i = 1; x - i >= 0 && i + y <gptr->height; i++) {
+		if (board[x - i][y + i] == gptr->player) {
 			for (int j = 0; j <= counter; j++) {
-				boardPtr[x  - j][y + j] = player;
+				board[x  - j][y + j] = gptr->player;
 			}
 			break;
 		}
-		if (boardPtr[x - i][y + i] == EMPTY) {
+		if (board[x - i][y + i] == EMPTY) {
 			break;
 		}
 		counter++;
@@ -509,35 +537,43 @@ void placePiece(uint** boardPtr, uint player, int x, int y) {
 	counter = 0;
 
 	// bottom right flips
-	for (int i = 1; x + i <width && y - i >= 0; i++) {
-		if (boardPtr[x + i][y - i] == player) {
+	for (int i = 1; x + i <gptr->width && y - i >= 0; i++) {
+		if (board[x + i][y - i] == gptr->player) {
 			for (int j = 0; j <= counter; j++) {
-				boardPtr[x  + j][y - j] = player;
+				board[x  + j][y - j] = gptr->player;
 			}
 			break;
 		}
-		if (boardPtr[x + i][y - i] == EMPTY) {
+		if (board[x + i][y - i] == EMPTY) {
 			break;
 		}
 	}
 }
-uint** duplicateBoard(uint** boardPtr) {
-	uint** newboardPtr = malloc(sizeof(uint*)*width);
-	uint* newboard = malloc(sizeof(uint)*height*width);
-	for (int i = 0; i<width; i++) {
-		newboardPtr[i] = &newboard[i*height];
+Game* duplicateGame(Game* gptr) {
+	Game* ngptr;
+	uint** boardPtr = (uint**)malloc(sizeof(uint*)*gptr->width);
+	uint* board = (uint*)malloc(sizeof(uint)* gptr->height*gptr->width);
+	for (int i = 0; i<gptr->width; i++) {
+		boardPtr[i] = &board[i*gptr->height];
 	}
-	for (int i = 0; i < width; i++) {
-		for (int j = 0; j < height; j++) {
-			newboardPtr[i][j] = boardPtr[i][j];
+	for (int i = 0; i < gptr->width; i++) {
+		for (int j = 0; j < gptr->height; j++) {
+			boardPtr[i][j] = gptr->board[i][j];
 		}
 	}
-	return newboardPtr;
+	ngptr = (Game*)malloc(sizeof(Game));
+	ngptr->board = boardPtr; //(uint**) malloc(sizeof(uint)*height*width);
+	ngptr->height = gptr->height;
+	ngptr->width = gptr->width;
+	ngptr->player = gptr->player;
+	ngptr->maxPlayer = gptr->maxPlayer;
+	return ngptr;
 }
 
-void freeBoard(uint** boardPtr) {
-	free(boardPtr[0]);
-	free(boardPtr);
+void freeGame(Game* gptr) {
+	free(gptr->board[0]);
+	free(gptr->board);
+	free(gptr);
 }
 
 void printMovesArr(uint* MovesArr, uint count, int width) {
@@ -612,11 +648,10 @@ void readInputs(int argc, char**argv) {
 			outputFilename);
 		exit(1);
 	}
-
-	if (strcmp(maxPlayerStrPtr, "WHITE")==0) {
+	if (maxPlayerStrPtr = "WHITE") {
 		maxPlayer = WHITE;
 	}
-	else if (strcmp(maxPlayerStrPtr, "BLACK")==0) {
+	else if (maxPlayerStrPtr = "BLACK") {
 		maxPlayer = BLACK;
 	}
 	else {
@@ -657,13 +692,15 @@ void saveRunResult(uint* bestMovesArr, int bestMovesCount) {
 int main(int argc, char **argv) {
 	readInputs(argc, argv);
 	printf("Started\n");
-	uint** boardPtr = createBoard(width, height, maxPlayer, whiteStrPtr, blackStrPtr);
+	uint** board = createBoard(width, height, maxPlayer, whiteStrPtr, blackStrPtr);
 	printf("Board %d x %d created\n",width,height);
 	
+	//printf("checking if placed at %d\n", board[4][4]);
+	Game* gptr = newGame(maxPlayer , width , height, board);
 	//printf("Game created\n");
-	uint* bestMovesArr = malloc(height*width * sizeof(uint));
+	uint* bestMovesArr = (uint*)malloc(gptr->height*gptr->width * sizeof(uint));
 	before = clock();
-	int bestMovesCount = solve(boardPtr, ply, bestMovesArr);
+	int bestMovesCount = solve(gptr, ply, bestMovesArr);
 	after = clock();
 	comp_time = after - before;
 
@@ -671,6 +708,6 @@ int main(int argc, char **argv) {
 
 	printf("Solved!\n");
 	free(bestMovesArr);
-	freeBoard(boardPtr);
+	freeGame(gptr);
 	return 0;
 }
