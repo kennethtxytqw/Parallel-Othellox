@@ -1,0 +1,151 @@
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 5
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of boards assessed: 1712
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 0 secs 165 msecs
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 5
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of boards assessed: 1712
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 0 secs 163 msecs
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 10
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of processor: 1
+Number of boards assessed: 28031540
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 33 secs 176 msecs
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 2
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of processor: 1
+Number of boards assessed: 16
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 0 secs 0 msecs
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 2
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of processor: 1
+Number of boards assessed: 16
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 0 secs 0 msecs
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 2
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of processor: 1
+Number of boards assessed: 16
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 0 secs 0 msecs
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 3
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of processor: 1
+Number of boards assessed: 72
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 0 secs 0 msecs
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 10
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of processor: 1
+Number of boards assessed: 28031540
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 35 secs 796 msecs
+########################################################################################################
+Size: 8,8
+White: { d4,e5 }
+Black: { d5,e4 }
+Color: BLACK
+Timeout: 10
+MaxDepth: 5
+MaxBoards: 100000000
+abPruning: FALSE
+CornerValue: 42
+EdgeValue: 4
+
+Best Moves: { d3, c4, f5, e6 }
+Number of processor: 1
+Number of boards assessed: 1712
+communication_time = 0 mins 0 secs 0 msecs
+computation_time = 0 mins 0 secs 3 msecs

@@ -1,0 +1,52 @@
+np = -np
+CC = gcc
+CFLAGS = -std=c99
+
+MPICC = mpicc
+dest = e0011845@tembusu2.comp.nus.edu.sg:./
+dest2 = e0011845@xcnc1.comp.nus.edu.sg:./othellox
+params = initialbrd.txt evalparams.txt
+subfiles = board.c util.c solver.c board.h util.h solver.h
+
+all: clean othellox othelloxMPI
+
+serial: clean othellox runS
+
+MPI: clean othelloxMPI runM
+
+othelloxMPI: othelloxMPI.c
+	$(CC) $(CFLAGS) -c board.c util.c solver.c -I./ && $(MPICC) $(CFLAGS) -o othelloxMPI othelloxMPI.c -I./ board.o util.o solver.o
+
+othellox: othellox.c
+	$(CC) $(CFLAGS) -c board.c solver.c util.c -I./ && $(CC) $(CFLAGS) -o othellox othellox.c -I./ board.o solver.o util.o
+
+runS: othellox
+	./othellox $(params)
+
+runM: othelloxMPI
+	mpirun $(np) $(NP) ./othelloxMPI $(params)
+
+clean: 
+	rm -f othellox othelloxMPI errS.txt errM.txt *.o
+
+tembusu: zip scp ## Zip and send to tembusu2
+
+zip:
+	zip othellox othellox.c othelloxMPI.c $(params) $(subfiles)
+
+scp:
+	scp Makefile othellox.zip $(dest) && rm othellox.zip
+
+scp2:
+	scp Makefile othellox.zip $(dest2)
+
+unzip:
+	unzip -o othellox.zip && rm othellox.zip
+
+runSS:
+	screen -R othellox -d -m make runS 2>errS.txt
+
+runMS:
+	screen -R othelloxMPI -d -m make runM 2>errM.txt
+
+runBoth: runSS runMS

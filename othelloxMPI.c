@@ -1,767 +1,299 @@
-#include <stdio.h>
-#include <assert.h>
-#include <stdlib.h>
-#include <sys/time.h>
-#include <string.h>
-#include <ctype.h>
+#include "board.h"
+#include "solver.h"
 #include <mpi.h>
-#include <time.h>
 
-
-
-#define BLACK 1
-#define WHITE 0
-#define EMPTY 2
-#define TRUE 1
-#define FALSE 0
-#define PLY 3
-#define SSIZE 8
-#define uchar unsigned char
-#define uint unsigned int
-#define delimiters " ,"
-#define INT_MAX 2^32
+#define TYPE "MPI"
 
 long long before, after;
-const uchar alphabets[26] = { 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z' };
-const char DELIM[] = delimiters;
 long long comm_time = 0;
 long long comp_time = 0;
-long long numBoards = 0;
-long long maxBoards;
+
+char whiteStr[26 * 26 * 3];
+char blackStr[26 * 26 * 3];
+int width = -1;
+int* widthPtr = &width;
+int height = -1;
+int* heightPtr = &height;
+int maxDepth = -1;
+int* maxDepthPtr = &maxDepth;
+int maxPlayer = -1;
+int* maxPlayerPtr = &maxPlayer;
+int abPruning = 1;
+int* abPruningPtr = &abPruning;
+int numBoards = 0;
+int* numBoardsPtr = &numBoards;
+int maxBoards = -1;
+int* maxBoardsPtr = &maxBoards;
+char* whiteStrPtr = whiteStr;
+char* blackStrPtr = blackStr;
+int timeout = 0;
+int* timeoutPtr = &timeout;
+uint bestMovesArr[26];
+int bestMovesCount = 0;
+int* bestMovesCountPtr = &bestMovesCount;
+
+// MPI needed variables
 int slaves;
 int slavesUsed;
 #define MASTER_ID slaves
-
-FILE *brdtxt, *evaltxt, *ofp;
-char* whiteInitialPos;
-char* blackInitialPos;
-char whiteStr[26 * 26 * 3];
-char blackStr[26 * 26 * 3];
-char maxPlayerStr[6];
-char* maxPlayerStrPtr = maxPlayerStr;
-char* whiteStrPtr = whiteStr;
-char* blackStrPtr = blackStr;
-
-int config[5];
+#define CONFIG_SIZE 6
+int config[CONFIG_SIZE];
 int* configPtr = config;
-int width;
-int height;
-int maxDepth;
-int maxPlayer;
-int nprocs;
-
 int myid;
 
-void saveRunResult(uint * bestMovesArr, int bestMovesCount);
-uint c_to_n(char c);
-uint * to2d(uint i, int width);
-int to1d(int x, int y, int width);
-char * mystrsep(char ** stringp, const char * delim);
-int availableMoves(uint ** boardPtr, int * movesPtr, int player);
-int countFlips(int x, int y, uint ** boardPtr, int player);
-uint ** createStandardBoard();
-uint ** createBoard(int width, int height, int player, char * whiteStrPtr, char * blackStrPtr);
-int solve(uint ** boardPtr, int ply, uint * bestMovesArr);
-int playMax(uint ** boardPtr, int ply);
-int playMin(uint ** boardPtr, int ply);
-int evaluate(uint ** boardPtr);
-uint ** makeMove(uint ** boardPtr, uint nextMove, uint player);
-void placePiece(uint ** boardPtr, uint player, int x, int y);
-uint ** duplicateBoard(uint ** boardPtr);
-void freeBoard(uint ** boardPtr);
-void printMovesArr(uint * MovesArr, uint count, int width);
-void fprintMovesArr(FILE * ofp, uint * MovesArr, uint count, int width);
-void readInputs(int argc, char ** argv);
+int player;
+int result;
+uint** boardPtr;
 
-long long wall_clock_time()
-{
-#ifdef LINUX
-	struct timespec tp;
-	clock_gettime(CLOCK_REALTIME, &tp);
-	return (long long)(tp.tv_nsec + (long long)tp.tv_sec * 1000000000ll);
-#else
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return (long long)(tv.tv_usec * 1000 + (long long)tv.tv_sec * 1000000000ll);
-#endif
-}
+int* solve(uint*** listOf_boardsPtr, int nB, int ply, int currPlayer);
 
-uint c_to_n(char c)
-{
-	uint n = -1;
-	static const char * const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-	char *p = strchr(alphabet, toupper((unsigned char)c));
-
-	if (p)
-	{
-		n = p - alphabet;
-	}
-
-	return n;
-}
-
-uint* to2d(uint i, int width) {
-	uint* iarr = malloc(sizeof(uint) * 2);
-	uint x = i%width;
-	uint y = i / width;
-	iarr[0] = x;
-	iarr[1] = y;
-	return iarr;
-}
-
-int to1d(int x, int y, int width) {
-	return y*width + x;
-}
-
-char* mystrsep(char** stringp, const char* delim)
-{
-	char* start = *stringp;
-	char* p;
-	p = (start != NULL) ? strpbrk(start, delim) : NULL;
-	if (p == NULL)
-	{
-		*stringp = NULL;
-	}
-	else
-	{
-		*p = '\0';
-		*stringp = p + 1;
-	}
-	/*if (p == "") {
-	return mystrsep(stringp, delim);
-	}*/
-	return start;
-}
-
-int availableMoves(uint** boardPtr, int* movesPtr, int player) {
-	int i = 0;
-	for (int y = 0; y < height; y++) {
-		for (int x = 0; x < width; x++) {
-			if (countFlips(x, y, boardPtr, player) > 0) {
-				movesPtr[i] = to1d(x, y, width);
-				i++;
-				//printf("%c%d is a valid move\n", alphabets[x],y);
-			}
-		}
-	}
-	return i;
-}
-
-int countFlips(int x, int y, uint** boardPtr, int player) {
-	// if the box is not EMPTY then return 0 flips which is an invalid move
-	if (boardPtr[x][y] != EMPTY) {
-		return 0;
-	}
-	int flips = 0;
-	int counter = 0;
-
-	// Count right flips
-	for (int i = x + 1; i < width; ++i) {
-		if (boardPtr[i][y] == player) {
-			flips += counter;
-			break;
-		}
-		if (boardPtr[i][y] == EMPTY) {
-			break;
-		}
-		//printf("Can flip at %d-%d for %d vs %d\n", i,y, boardPtr[i][y] , gptr->player);
-		counter++;
-	}
-	counter = 0;
-
-	//Count left flips
-	for (int i = x - 1; i >= 0; --i) {
-		if (boardPtr[i][y] == player) {
-			flips += counter;
-			break;
-		}
-		if (boardPtr[i][y] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	//Count top flips
-	for (int j = y + 1; j < height; j++) {
-		if (boardPtr[x][j] == player) {
-			flips += counter;
-			break;
-		}
-		if (boardPtr[x][j] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	//Count bottom flips
-	for (int j = y - 1; j >= 0; j--) {
-		if (boardPtr[x][j] == player) {
-			flips += counter;
-			break;
-		}
-		if (boardPtr[x][j] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	//Count top right flips
-	for (int i = 1; i + x < width && i + y < height; i++) {
-		if (boardPtr[x + i][y + i] == player) {
-			flips += counter;
-			break;
-		}
-		if (boardPtr[x + i][y + i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	//Count bottom left flips
-	for (int i = 1; x - i >= 0 && y - i >= 0; i++) {
-		if (boardPtr[x - i][y - i] == player) {
-			flips += counter;
-			break;
-		}
-		if (boardPtr[x - i][y - i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	//Count top left flips
-	for (int i = 1; x - i >= 0 && i + y < height; i++) {
-		if (boardPtr[x - i][y + i] == player) {
-			flips += counter;
-			break;
-		}
-		if (boardPtr[x - i][y + i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	//Count bottom right flips
-	for (int i = 1; x + i < width && y - i >= 0; i++) {
-		if (boardPtr[x + i][y - i] == player) {
-			flips += counter;
-			break;
-		}
-		if (boardPtr[x + i][y - i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-	//printf("checking %d-%d has %d\n", x,y,flips);
-	return flips;
-}
-
-
-uint** createStandardBoard() {
-	printf("Starting boardPtr creation\n");
-	uint** boardPtr = malloc(sizeof(uint*)*SSIZE);
-	for (int i = 0; i < SSIZE; i++) {
-		boardPtr[i] = malloc(sizeof(uint)*SSIZE);
-	}
-	for (int i = 0; i < SSIZE; i++) {
-		for (int j = 0; j < SSIZE; j++) {
-			boardPtr[i][j] = 0;
-		}
-	}
-	boardPtr[4][4] = WHITE;
-	boardPtr[5][5] = WHITE;
-	boardPtr[5][4] = BLACK;
-	boardPtr[4][5] = BLACK;
-	return boardPtr;
-}
-
-uint** createBoard(int width, int height, int player, char* whiteStrPtr, char* blackStrPtr) {
-	printf("Starting boardPtr creation\n");
-	char* token;
-	//This way i make sure i create my board such that the data is contiguous
-	uint** boardPtr = malloc(sizeof(uint*)*width);
-	uint* board = malloc(sizeof(uint)*height*width);
-	for (int i = 0; i < width; i++) {
-		boardPtr[i] = &board[i*height];
-	}
-	for (int i = 0; i < width; i++) {
-		for (int j = 0; j < height; j++) {
-			boardPtr[i][j] = EMPTY;
-		}
-	}
-	while ((token = mystrsep(&whiteStrPtr, DELIM)) != NULL) {
-		printf("Placing white token at %s\n", token);
-		//printf("Placing white token at %d-%d\n", c_to_n(token[0]),token[1]-'0');
-		boardPtr[c_to_n(token[0])][token[1] - '0'] = WHITE;
-	}
-	while ((token = mystrsep(&blackStrPtr, DELIM)) != NULL) {
-		printf("Placing black token at %s\n", token);
-		//printf("Placing white token at %d-%d\n", c_to_n(token[0]), token[1]-'0');
-		boardPtr[c_to_n(token[0])][token[1] - '0'] = BLACK;
-	}
-	return boardPtr;
-}
-
-int solve(uint** boardPtr, int ply, uint* bestMovesArr) {
+int master(uint** boardPtr, int ply, uint* bestMovesArr) {
 	if (ply == 0) {
-		printf("ply == 0");
+		//fprintf(stderr,"ply == 0");
 		return 0;
 	}
+	uint* movesArr = malloc(100 * sizeof(uint));
+	int* values;
+	uint*** listOf_boardsPtr = malloc(sizeof(uint**));
+	listOf_boardsPtr[0] = boardPtr;
+	//printBoard(listOf_boardsPtr[0],width,height);
+	int numMoves = availableMoves(boardPtr, movesArr, maxPlayer, width, height);
+	values = solve(listOf_boardsPtr, 1, maxDepth, maxPlayer);
+	int currMax = INT_MIN;
+	for (int i = 0; i < numMoves; i++) {
+		//fprintf(stderr, "Move %d scores %d pts\n", movesArr[i], values[i]);
+		if (currMax < values[i]) {
+			currMax = values[i];
+			bestMovesCount = 0;
+		}
+		if (currMax <= values[i]) {
+			bestMovesArr[bestMovesCount] = movesArr[i];
+			bestMovesCount++;
+			
+		}
+	}
+	
+	
 
+	//free(movesArr);
+	//free(listOf_boardsPtr);
+	return bestMovesCount;
+}
+
+void master_distribute(uint*** listOf_boardsPtr, int* numMoves_of_each_board, int currPlayer, int ply, int nB, int* recvB, MPI_Request* requests) {
 	before = wall_clock_time();
-	int value = -INT_MAX;
-	uint* movesArr = malloc(height*width * sizeof(uint));
-	int numMoves = availableMoves(boardPtr, movesArr, maxPlayer);
-	slavesUsed = numMoves;
-	if (numMoves == 0) {
-		printf("No available moves");
-		return 0;
-	}
-	int temp;
 	int bestMovesCount;
 	config[0] = height;
 	config[1] = width;
 	config[2] = maxPlayer;
-	config[3] = ply - 1;
+	config[3] = ply;
 	config[4] = maxBoards;
+	config[5] = currPlayer; // This should be the player you want the slaves to play as.
 	after = wall_clock_time();
 	comp_time += after - before;
+	
+	int bCtr = 0;
+	int mCtr = 0;
 
+	for (int i = 0; i < slaves; i++) {
+		//fprintf(stderr, "MASTER SENDING config TO PROCESS %d\n", i);
+
+		before = wall_clock_time();
+		MPI_Isend(config, CONFIG_SIZE, MPI_INT, i, 1, MPI_COMM_WORLD, &(requests[i]));
+		after = wall_clock_time();
+		comm_time += after - before;
+	}
+
+}
+
+int* master_taskpooling(uint*** listOf_boardsPtr, int* numMoves_of_each_board, int currPlayer, int* recvB, int numMoves, int nB, MPI_Request* requests) {
+	int sent = 0;
+	int received = 0;
+	int bCtr = 0;
+	int mCtr = 0;
+
+	int* values = malloc(sizeof(int)*numMoves);
 	for (int i = 0; i < numMoves; i++) {
-		fprintf(stderr, "MASTER SENDING config TO PROCESS %d\n",i);
+		if (currPlayer == maxPlayer) {
+			values[i] = INT_MIN;
+		}
+		else {
+			values[i] = INT_MAX;
+		}
+		
+	}
 
+	for(int i =0; i<slaves;i++){
+		//fprintf(stderr, "MASTER SENDING newBoardPtr TO PROCESS %d\n", i);
+		//fprintf(stderr, "sending bCtr %d with mCtr %d\n", bCtr, mCtr);
 		before = wall_clock_time();
-		MPI_Send(config, 5, MPI_INT, i, 1, MPI_COMM_WORLD);
-		after = wall_clock_time();
-		comm_time += after - before;
-
-		before = wall_clock_time();
-		uint** newBoardPtr = makeMove(boardPtr, movesArr[i], maxPlayer);
-		after = wall_clock_time();
-		comp_time += after - before;
-
-		//temp = playMin(newBoard, ply - 1);
-		fprintf(stderr, "MASTER SENDING newBoardPtr TO PROCESS %d\n", i);
-
-		before = wall_clock_time();
-		MPI_Send(newBoardPtr[0], height*width, MPI_UNSIGNED, i, !maxPlayer, MPI_COMM_WORLD);
-		after = wall_clock_time();
-		comm_time += after - before;
-
+		MPI_Isend(listOf_boardsPtr[bCtr][0], height*width, MPI_UNSIGNED, i, bCtr * 1000 + mCtr, MPI_COMM_WORLD, &(requests[i]));
+		//MPI_Isend(boardPtr[0], height*width, MPI_UNSIGNED, i, mCtr, MPI_COMM_WORLD, &(requests[i]));
+		//printBoard(listOf_boardsPtr[bCtr],width,height);
 		//freeBoard(newBoardPtr);
-	}
-	for (int i = 0; i < numMoves; i++) {
-		MPI_Status status;
-		fprintf(stderr, "MASTER RECEIVING FROM PROCESS %d\n", i);
-
-		before = wall_clock_time();
-		MPI_Recv(&temp, 1, MPI_UNSIGNED, i, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+		MPI_Irecv(&(recvB[i]), 1, MPI_INT, i, bCtr, MPI_COMM_WORLD, &(requests[i]));
 		after = wall_clock_time();
 		comm_time += after - before;
+		if (numMoves_of_each_board[bCtr] - 1 > mCtr) {
+			mCtr++;
 
-		fprintf(stderr, "MASTER RECEIVED FROM PROCESS %d\n", i);
-		before = wall_clock_time();
-		if (temp > value) {
-			value = temp;
-			bestMovesCount = 0;
-			bestMovesArr[bestMovesCount] = movesArr[i];
-			bestMovesCount++;
-			printf("Move %d has %d\n", movesArr[i], temp);
 		}
-		else if (temp == value) {
-			value = temp;
-			bestMovesArr[bestMovesCount] = movesArr[i];
-			bestMovesCount++;
-			printf("Move %d has %d\n", movesArr[i], temp);
+		else {
+			mCtr = 0;
+			bCtr++;
+		}
+		sent++;
+		
+	}
+	while (sent < numMoves || received < numMoves) {
+		MPI_Status status;
+		// p keeps track of who has completed so that we can reassign
+		int p, pval;
+		//fprintf(stderr, "MASTER Waiting for any report\n");
+		MPI_Waitany(slaves, requests, &p, &status);
+
+		// move dictates which board is this value for, AKA the bCtr it was
+		int parentBrdIdx = status.MPI_TAG;
+		pval = recvB[p];
+		//fprintf(stderr, "MASTER RECEIVED FROM PROCESS %d\n", p);
+		received++;
+		if (sent < numMoves) {
+			before = wall_clock_time();
+			//fprintf(stderr, "MASTER SENDING ANOTHER TASK %d of numMoves %d TO PROCESS %d\n", sent, numMoves,p);
+			//fprintf(stderr, "sending bCtr %d with mCtr %d\n", bCtr, mCtr);
+			//printBoard(listOf_boardsPtr[bCtr],width,height);
+			MPI_Isend(listOf_boardsPtr[bCtr][0], height*width, MPI_UNSIGNED, p, bCtr*1000+mCtr, MPI_COMM_WORLD, &(requests[p]));
+			MPI_Irecv(&(recvB[p]), 1, MPI_INT, p, bCtr, MPI_COMM_WORLD, &(requests[p]));
+			after = wall_clock_time();
+			comm_time += after - before;
+			sent++;
+			if (numMoves_of_each_board[bCtr] - 1 > mCtr) {
+				mCtr++;
+
+			}
+			else {
+				//fprintf(stderr, "Board %d has %d moves\n", bCtr, numMoves_of_each_board[bCtr]);
+				mCtr = 0;
+				bCtr++;
+			}
+		}
+		before = wall_clock_time();
+		//fprintf(stderr, "Move %d can get %d compared to %d\n", parentBrdIdx, pval, values[parentBrdIdx]);
+		if (currPlayer == maxPlayer && pval > values[parentBrdIdx]) {
+			
+			values[parentBrdIdx] = pval;
+		}
+		else if (currPlayer != maxPlayer && pval < values[parentBrdIdx]) {
+			values[parentBrdIdx] = pval;
 		}
 		after = wall_clock_time();
 		comp_time += after - before;
 	}
-	free(movesArr);
-	return bestMovesCount;
+
+	for (int i = 0; i < slaves; i++) {
+		MPI_Isend(boardPtr[0], width*height, MPI_UNSIGNED, i, INT_MAX, MPI_COMM_WORLD, &(requests[i]));
+	}
+	return values;
 }
 
-int playMax(uint** boardPtr, int ply) {
-	if (ply == 0 || numBoards == maxBoards) {
-		return evaluate(boardPtr);
+int* solve(uint*** listOf_boardsPtr, int nB, int ply, int currPlayer) {
+	int numMoves = 0;
+	int* numMoves_of_each_board = malloc(sizeof(int)*nB);
+	uint** listOf_movesArr = malloc(nB* sizeof(uint*));
+	uint* movesArr = malloc(100 * nB * sizeof(uint));
+	
+	int* recvB = malloc(sizeof(int)*numMoves*3);
+	int* values;
+	for (int i = 0; i < nB; i++) {
+		listOf_movesArr[i] = &movesArr[i*nB];
+		//printBoard(listOf_boardsPtr[i], width, height);
+		numMoves_of_each_board[i] = availableMoves(listOf_boardsPtr[i], listOf_movesArr[i], currPlayer, width, height);
+		numMoves += numMoves_of_each_board[i];
+		//fprintf(stderr, "Board %d has %d moves\n", i, numMoves_of_each_board[i]);
 	}
-	else {
-		//fprintf(stderr, "PROCESS %d PLAYING FOR MAX %d\n", myid, ply);
-		int value = -INT_MAX;
-		uint* movesArr = malloc(height*width * sizeof(uint));
-		int numMoves = availableMoves(boardPtr, movesArr, maxPlayer);
-		if (numMoves == 0) {
-			return playMin(boardPtr, ply - 1);
-		}
-		int temp;
-		for (int i = 0; i < numMoves; i++) {
-			uint** newBoard = makeMove(boardPtr, movesArr[i], maxPlayer);
-			temp = playMin(newBoard, ply - 1);
-			if (temp > value) {
-				value = temp;
-			}
-			freeBoard(newBoard);
-		}
-		//printf("Done Max\n");
+
+	MPI_Request* requests = malloc(sizeof(MPI_Request) * slaves);
+	if (numMoves >= slaves*2) {
+		master_distribute(listOf_boardsPtr, numMoves_of_each_board, currPlayer, ply - 1, nB, recvB, requests);
+		values = master_taskpooling(listOf_boardsPtr, numMoves_of_each_board,currPlayer, recvB, numMoves, nB, requests);
+		//free(numMoves_of_each_board);
 		free(movesArr);
-
-		return value;
-	}
-}
-
-int playMin(uint** boardPtr, int ply) {
-	if (ply == 0 || numBoards == maxBoards) {
-		return evaluate(boardPtr);
+		free(listOf_movesArr);
+		//free(recvB);
+		return values;
 	}
 	else {
-		//fprintf(stderr, "PROCESS %d PLAYING FOR MIN %d\n", myid, ply);
-		int value = INT_MAX;
-		uint* movesArr = malloc(height*width * sizeof(uint));
-		int numMoves = availableMoves(boardPtr, movesArr, !maxPlayer);
-		if (numMoves == 0) {
-			return playMax(boardPtr, ply - 1);
-		}
-		int temp;
+		uint*** newlistof_boardsptr = malloc(sizeof(uint**)*numMoves);
+		int bCtr = 0;
+		int mCtr = 0;
 		for (int i = 0; i < numMoves; i++) {
-			uint** newBoard = makeMove(boardPtr, movesArr[i], !maxPlayer);
-			temp = playMax(newBoard, ply - 1);
-			if (temp < value) {
-				value = temp;
+
+			newlistof_boardsptr[i] = makeMove(listOf_boardsPtr[bCtr], listOf_movesArr[bCtr][mCtr], currPlayer, width, height);
+			numBoards++;
+			if (numMoves_of_each_board[bCtr] - 1 > mCtr) {
+				mCtr++;
 			}
-			freeBoard(newBoard);
+			else {
+				mCtr = 0;
+				bCtr++;
+			}
 		}
-		//printf("Done Min\n");
+		values = solve(newlistof_boardsptr, numMoves, ply - 1,!currPlayer);
+		//free(numMoves_of_each_board);
 		free(movesArr);
-		return value;
-	}
-}
-
-int evaluate(uint** boardPtr) {
-	int score = 0;
-	for (int i = 0; i < width; i++) {
-		for (int j = 0; j < height; j++) {
-			if (boardPtr[i][j] == maxPlayer) {
-				score++;
-			}
-			//printf("%d-%d is %d\n", i, j, gptr->boardPtr[i][j]);
-		}
+		free(listOf_movesArr);
+		//free(recvB);
+		//for (int i = 0; i < numMoves; i++) {
+		//	free(newlistof_boardsptr[i]);
+		//}
+		//free(newlistof_boardsptr);
+		return values;
 	}
 
-	return score;
-}
-
-uint** makeMove(uint** boardPtr, uint nextMove, uint player) {
-	uint* move = to2d(nextMove, width);
-	uint x = move[0];
-	uint y = move[1];
-	uint** newBoardPtr = duplicateBoard(boardPtr);
-
-	placePiece(newBoardPtr, player, x, y);
-	++numBoards;
-	free(move);
-	return newBoardPtr;
-}
-
-void placePiece(uint** boardPtr, uint player, int x, int y) {
-	int counter = 0;
-	for (int i = x + 1; i < width; ++i) {
-		if (boardPtr[i][y] == player) {
-			for (int j = 0; j <= counter; j++) {
-				boardPtr[x + j][y] = player;
-			}
-			break;
-		}
-		if (boardPtr[i][y] == EMPTY) {
-			break;
-		}
-		//printf("Can flip at %d-%d for %d vs %d\n", i,y, boardPtr[i][y] , gptr->player);
-		counter++;
-	}
-	counter = 0;
-
-	//left flips
-	for (int i = x - 1; i >= 0; --i) {
-		if (boardPtr[i][y] == player) {
-			for (int j = 0; j <= counter; j++) {
-				boardPtr[x - j][y] = player;
-			}
-			break;
-		}
-		if (boardPtr[i][y] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	// top flips
-	for (int i = y + 1; i < height; i++) {
-		if (boardPtr[x][i] == player) {
-			for (int j = 0; j <= counter; j++) {
-				boardPtr[x][y + j] = player;
-			}
-			break;
-		}
-		if (boardPtr[x][i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	// bottom flips
-	for (int i = y - 1; i >= 0; i--) {
-		if (boardPtr[x][i] == player) {
-			for (int j = 0; j <= counter; j++) {
-				boardPtr[x][y - j] = player;
-			}
-			break;
-		}
-		if (boardPtr[x][i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	// top right flips
-	for (int i = 1; i + x < width && i + y < height; i++) {
-		if (boardPtr[x + i][y + i] == player) {
-			for (int j = 0; j <= counter; j++) {
-				boardPtr[x + j][y + j] = player;
-			}
-			break;
-		}
-		if (boardPtr[x + i][y + i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	// bottom left flips
-	for (int i = 1; x - i >= 0 && y - i >= 0; i++) {
-		if (boardPtr[x - i][y - i] == player) {
-			for (int j = 0; j <= counter; j++) {
-				boardPtr[x - j][y - j] = player;
-			}
-			break;
-		}
-		if (boardPtr[x - i][y - i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	// top left flips
-	for (int i = 1; x - i >= 0 && i + y < height; i++) {
-		if (boardPtr[x - i][y + i] == player) {
-			for (int j = 0; j <= counter; j++) {
-				boardPtr[x - j][y + j] = player;
-			}
-			break;
-		}
-		if (boardPtr[x - i][y + i] == EMPTY) {
-			break;
-		}
-		counter++;
-	}
-	counter = 0;
-
-	// bottom right flips
-	for (int i = 1; x + i < width && y - i >= 0; i++) {
-		if (boardPtr[x + i][y - i] == player) {
-			for (int j = 0; j <= counter; j++) {
-				boardPtr[x + j][y - j] = player;
-			}
-			break;
-		}
-		if (boardPtr[x + i][y - i] == EMPTY) {
-			break;
-		}
-	}
-}
-uint** duplicateBoard(uint** boardPtr) {
-	uint** newboardPtr = malloc(sizeof(uint*)*width);
-	uint* newboard = malloc(sizeof(uint)*height*width);
-	for (int i = 0; i < width; i++) {
-		newboardPtr[i] = &newboard[i*height];
-	}
-	for (int i = 0; i < width; i++) {
-		for (int j = 0; j < height; j++) {
-			newboardPtr[i][j] = boardPtr[i][j];
-		}
-	}
-	return newboardPtr;
-}
-
-void freeBoard(uint** boardPtr) {
-	free(boardPtr[0]);
-	free(boardPtr);
-}
-
-void printMovesArr(uint* MovesArr, uint count, int width) {
-	printf("Best Moves: { ");
-	for (int i = 0; i < count; i++) {
-		if (i > 0) {
-			printf(", ");
-		}
-		uint* move = to2d(MovesArr[i], width);
-		printf("%c%d", alphabets[move[0]], move[1]);
-	}
-	printf(" }\n");
-}
-
-void fprintMovesArr(FILE* ofp, uint* MovesArr, uint count, int width) {
-	fprintf(ofp, "Best Moves: { ");
-	for (int i = 0; i < count; i++) {
-		if (i > 0) {
-			fprintf(ofp, ", ");
-		}
-		uint* move = to2d(MovesArr[i], width);
-		fprintf(ofp, "%c%d", alphabets[move[0]], move[1]);
-	}
-	fprintf(ofp, " }\n");
-}
-
-void readInputs(int argc, char**argv) {
-	//checking for arguments
-	printf("The argument supplied to %s are", argv[0]);
-	for (int i = 1; i < argc - 1; i++) {
-		printf(" %s ", argv[i]);
-		if (i < argc - 1) {
-			printf("and");
-		}
-	}
-	printf(". Check that the first two arguments are intitial board config and evaluation parameters respectively.\n");
-	if (argc < 3) {
-		printf("Too little arguments supplied, check README.\n");
-		exit(1);
-	}
-
-	//Opening file inputs
-
-	char *mode = "r";
-	char outputFilename[30];
-	char* opfp = outputFilename;
-
-	brdtxt = fopen(argv[1], mode);
-	evaltxt = fopen(argv[2], mode);
-
-	if (brdtxt == NULL) {
-		fprintf(stderr, "Can't open input file %s!\n", argv[1]);
-		exit(1);
-	}
-
-	fscanf(brdtxt, "Size: %d,%d\n", &width, &height);
-	fscanf(brdtxt, "White: { %s }\n", whiteStr);
-	fscanf(brdtxt, "Black: { %s }\n", blackStr);
-
-	if (evaltxt == NULL) {
-		fprintf(stderr, "Can't open input file %s!\n", argv[2]);
-		exit(1);
-	}
-	fscanf(evaltxt, "MaxDepth: %d\n", &maxDepth);
-	fscanf(evaltxt, "MaxBoards: %lld\n", &maxBoards);
-	fscanf(evaltxt, "MaxPlayer: %s\n", maxPlayerStr);
-
-	sprintf(opfp, "outMPI%dx%d.txt", width, height);
-	ofp = fopen(outputFilename, "a");
-
-	if (ofp == NULL) {
-		fprintf(stderr, "Can't open output file %s!\n",
-			outputFilename);
-		exit(1);
-	}
-
-	if (strcmp(maxPlayerStrPtr, "WHITE") == 0) {
-		maxPlayer = WHITE;
-	}
-	else if (strcmp(maxPlayerStrPtr, "BLACK") == 0) {
-		maxPlayer = BLACK;
-	}
-	else {
-		fprintf(stderr, "Can't tell who is the MaxPlayer: %s!\n", maxPlayerStr);
-	}
-
-	fseek(brdtxt, 0, SEEK_SET);
-	fseek(evaltxt, 0, SEEK_SET);
-	fprintf(ofp, "########################################################################################################\n");
-	char ch;
-	while ((ch = fgetc(brdtxt)) != EOF)		fputc(ch, ofp);
-	fputc('\n', ofp);
-	while ((ch = fgetc(evaltxt)) != EOF)	fputc(ch, ofp);
-	fputc('\n', ofp);
-	fclose(evaltxt);
-	fclose(brdtxt);
-}
-
-void saveRunResult(uint* bestMovesArr, int bestMovesCount) {
-	fprintMovesArr(ofp, bestMovesArr, bestMovesCount, width);
-	printf("Number of boards assessed: %lld\n", numBoards);
-	fprintf(ofp, "Number of boards assessed: %lld\n", numBoards);
-
-	if (maxPlayer == BLACK) {
-
-		fprintf(ofp, "Max Player: BLACK\n");
-	}
-	else {
-		fprintf(ofp, "Max Player: WHITE\n");
-	}
-	printf("communication_time = %lld mins %lld secs %lld msecs\n", comm_time / 1000000000 / 60, comm_time / 1000000000 % 60, comm_time * 1000 / 1000000000 % 1000);
-	fprintf(ofp, "communication_time = %lld mins %lld secs %lld msecs\n", comm_time / 1000000000/ 60, comm_time / 1000000000 % 60, comm_time * 1000 / 1000000000 % 1000);
-
-	printf("computation_time = %lld mins %lld secs %lld msecs\n", comp_time / 1000000000 / 60, comp_time / 1000000000 % 60, comp_time * 1000 / 1000000000 % 1000);
-	fprintf(ofp, "computation_time = %lld mins %lld secs %lld msecs\n", comp_time / 1000000000 / 60, comp_time / 1000000000 % 60, comp_time * 1000 / 1000000000 % 1000);
-	fclose(ofp);
 }
 
 void reportRunResult() {
-	MPI_Send(&numBoards, 1, MPI_LONG , MASTER_ID, 1, MPI_COMM_WORLD );
+
+
+	MPI_Send(&numBoards, 1, MPI_INT , MASTER_ID, INT_MAX-1, MPI_COMM_WORLD );
 	long long timings[2] = { comm_time, comp_time };
-	MPI_Send(timings, 2, MPI_LONG_LONG, MASTER_ID, 2, MPI_COMM_WORLD);
+	MPI_Send(&(timings[0]), 2, MPI_LONG_LONG, MASTER_ID, INT_MAX-2, MPI_COMM_WORLD);
+	fprintf(stderr, "MYID %d----numBoards = %d\n", myid, numBoards);
+	fprintf(stderr, "MYID %d----communication_time = %lld mins %lld secs %lld msecs\n", myid, comm_time / 1000000000 / 60, comm_time / 1000000000 % 60, comm_time * 1000 / 1000000000 % 1000);
+	fprintf(stderr, "MYID %d----computation_time = %lld mins %lld secs %lld msecs\n", myid, comp_time / 1000000000 / 60, comp_time / 1000000000 % 60, comp_time * 1000 / 1000000000 % 1000);
+
 }
 
 void retrieveRunResults() {
-	long long nB;
+	int nB;
 	long long timings[2];
 	MPI_Status status;
 	fprintf(stderr, "MASTER----communication_time = %lld mins %lld secs %lld msecs\n", comm_time / 1000000000 / 60, comm_time / 1000000000 % 60, comm_time * 1000 / 1000000000 % 1000);
 	fprintf(stderr, "MASTER----computation_time = %lld mins %lld secs %lld msecs\n", comp_time / 1000000000 / 60, comp_time / 1000000000 % 60, comp_time * 1000 / 1000000000 % 1000);
-	for (int i = 0; i < slavesUsed; i++) {
-		MPI_Recv(&nB, 1, MPI_LONG_LONG, i, 1, MPI_COMM_WORLD, &status);
-		MPI_Send(timings, 2, MPI_LONG_LONG, i, 2, MPI_COMM_WORLD);
-		fprintf(stderr, "Process %d----numBoards = %lld\n", i, nB);
-		fprintf(stderr, "Process %d----communication_time = %lld mins %lld secs %lld msecs\n",i, timings[0] / 1000000000 / 60, timings[0] / 1000000000 % 60, timings[0] * 1000 / 1000000000 % 1000);
-		fprintf(stderr, "Process %d----computation_time = %lld mins %lld secs %lld msecs\n",i, timings[1] / 1000000000 / 60, timings[1] / 1000000000 % 60, timings[1] * 1000 / 1000000000 % 1000);
+	for (int i = 0; i < slaves; i++) {
+		MPI_Recv(&nB, 1, MPI_INT, i, INT_MAX-1, MPI_COMM_WORLD, &status);
+		//fprintf(stderr, "MPI_TAG: %d, MPI_SOURCE: %d MPI_ERROR: %d\n", status.MPI_TAG, status.MPI_SOURCE, status.MPI_ERROR);
+		MPI_Recv(timings, 2, MPI_LONG_LONG, i, INT_MAX-2, MPI_COMM_WORLD, &status);
+		//fprintf(stderr, "Process %d----numBoards = %d\n", i, nB);
+		//fprintf(stderr, "Process %d----communication_time = %lld mins %lld secs %lld msecs\n",i, timings[0] / 1000000000 / 60, timings[0] / 1000000000 % 60, timings[0] * 1000 / 1000000000 % 1000);
+		//fprintf(stderr, "Process %d----computation_time = %lld mins %lld secs %lld msecs\n",i, timings[1] / 1000000000 / 60, timings[1] / 1000000000 % 60, timings[1] * 1000 / 1000000000 % 1000);
 		numBoards += nB;
 		comm_time += timings[0];
 		comp_time += timings[1];
 	}
 }
 
-void slave() {
-	int player;
-	int result;
-	
+void slave_receive_config() {
 	MPI_Status status;
-	fprintf(stderr, "PROCESS %d ready to receive config\n", myid);
+	//fprintf(stderr, "PROCESS %d ready to receive config\n", myid);
 
 	before = wall_clock_time();
-	MPI_Recv(config, 5, MPI_INT, MASTER_ID, 1, MPI_COMM_WORLD, &status);
+	MPI_Recv(config, CONFIG_SIZE, MPI_INT, MASTER_ID, 1, MPI_COMM_WORLD, &status);
 	after = wall_clock_time();
 	comm_time += after - before;
 
-	fprintf(stderr, "PROCESS %d RECEIVED config ", myid);
-	fprintf(stderr, " {%d,%d,%d,%d}FROM MASTER\n", config[0], config[1],config[2],config[3]);
+	//fprintf(stderr, "PROCESS %d RECEIVED config ", myid);
+	//fprintf(stderr, " {h:%d,w:%d,maxPlayer:%d,maxDepth:%d,maxB:%d,currPlayer:%d}FROM MASTER\n", config[0], config[1], config[2], config[3], config[4], config[5]);
 
 	before = wall_clock_time();
 	height = config[0];
@@ -769,43 +301,71 @@ void slave() {
 	maxPlayer = config[2];
 	maxDepth = config[3];
 	maxBoards = config[4];
-	uint** boardPtr = malloc(sizeof(uint*)*width);
-	uint* board = malloc(sizeof(uint)*width*height);
-	for (int i = 0; i < width; i++) {
-		boardPtr[i] = &board[i*height];
-	}
+	player = config[5];
 	after = wall_clock_time();
 	comp_time += after - before;
+}
 
-	fprintf(stderr, "PROCESS %d RECEIVING FROM MASTER\n", myid);
+int slave_receive_board() {
+	MPI_Status status;
+	uint** boardPtrBuf = createBoard(width, height);
+	//fprintf(stderr, "PROCESS %d RECEIVING BOARD FROM MASTER\n", myid);
 
 	before = wall_clock_time();
-	MPI_Recv(boardPtr[0], height*width, MPI_UNSIGNED, MASTER_ID, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+	//printBoard(boardPtrBuf, width, height);
+	MPI_Recv(boardPtrBuf[0], height*width, MPI_UNSIGNED, MASTER_ID, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+	//printBoard(boardPtrBuf, width, height);
 	after = wall_clock_time();
 	comm_time += after - before;
 
-	fprintf(stderr, "PROCESS %d RECEIVED FROM MASTER\n", myid);
+	
+	if (status.MPI_TAG == INT_MAX) {
+		return -1;
+	}
 	before = wall_clock_time();
-	player = status.MPI_TAG;
-	fprintf(stderr, "PROCESS %d RECEIVED TAG %d\n", myid, player);
-	if (player == maxPlayer) {
-		fprintf(stderr, "PROCESS %d PLAYING MAX WITH %d ply\n", myid, maxDepth);
-		result = playMax(boardPtr, maxDepth);
-
-	}
-	else {
-		fprintf(stderr, "PROCESS %d PLAYING MIN WITH %d ply\n", myid, maxDepth);
-		result = playMin(boardPtr, maxDepth);
-	}
+	int* movesArr = malloc(sizeof(int) * 100);
+	availableMoves(boardPtrBuf, movesArr, player, width, height);
+	boardPtr = makeMove(boardPtrBuf, movesArr[status.MPI_TAG%1000] , player, width, height);
+	player = !player;
+	//printBoard(boardPtr, width, height);
+	numBoards++;
 	after = wall_clock_time();
 	comp_time += after - before;
 
-	fprintf(stderr, "PROCESS %d SENDING RESULT %d\n", myid, result);
-
+	free(movesArr);
+	freeBoard(boardPtrBuf);
+	//fprintf(stderr, "PROCESS %d RECEIVED BOARD %d TO PLAY MOVE %d FROM MASTER\n", myid, status.MPI_TAG/1000, status.MPI_TAG%1000);
 	before = wall_clock_time();
-	MPI_Send(&result, 1, MPI_UNSIGNED, MASTER_ID, player, MPI_COMM_WORLD);
-	after = wall_clock_time();
-	comm_time += after - before;
+	//fprintf(stderr, "PROCESS %d RECEIVED Player %d\n", myid, player);
+	return status.MPI_TAG/1000;
+}
+
+void slave() {
+	slave_receive_config();
+	int parentBrdIdx = slave_receive_board();
+	while (parentBrdIdx != -1) {
+		before = wall_clock_time();
+		if (player == maxPlayer) {
+			//fprintf(stderr, "PROCESS %d STARTING MAX WITH %d ply on player %d \n", myid, maxDepth, player);
+			result = playMax(boardPtr, maxDepth, bestMovesCountPtr, bestMovesArr, INT_MIN, INT_MAX, width, height, maxBoards, maxDepth, abPruning, maxPlayer, numBoardsPtr);
+
+		}
+		else {
+			//fprintf(stderr, "PROCESS %d STARTING MIN WITH %d ply on player %d \n", myid, maxDepth, player);
+			result = playMin(boardPtr, maxDepth, bestMovesCountPtr, bestMovesArr, INT_MIN, INT_MAX, width, height, maxBoards, maxDepth, abPruning, maxPlayer, numBoardsPtr);
+		}
+		after = wall_clock_time();
+		comp_time += after - before;
+
+		//fprintf(stderr, "PROCESS %d SENDING RESULT %d FOR BOARD %d\n", myid, result, parentBrdIdx);
+
+		before = wall_clock_time();
+		MPI_Send(&result, 1, MPI_INT, MASTER_ID, parentBrdIdx, MPI_COMM_WORLD);
+		after = wall_clock_time();
+		comm_time += after - before;
+		player = !player;
+		parentBrdIdx = slave_receive_board();
+	}
 }
 
 int main(int argc, char **argv) {
@@ -818,28 +378,31 @@ int main(int argc, char **argv) {
 	
 
 	if (myid == MASTER_ID) {
-		readInputs(argc, argv);
-		printf("Started\n");
+		long long start = wall_clock_time();
+		readInputs(argc, argv, widthPtr, heightPtr, maxDepthPtr, maxBoardsPtr, maxPlayerPtr, abPruningPtr, whiteStrPtr, blackStrPtr, timeoutPtr, TYPE);
+		//fprintf(stderr,"Started\n");
 	
-		fprintf(stderr, " +++ Process %d is master\n", myid);
-		uint** boardPtr = createBoard(width, height, maxPlayer, whiteStrPtr, blackStrPtr);
-		printf("Board %d x %d created\n", width, height);
+		//fprintf(stderr, " +++ Process %d is master\n", myid);
+		boardPtr = initBoard(width, height, maxPlayer, whiteStrPtr, blackStrPtr);
+		//fprintf(stderr,"Board %d x %d created\n", width, height);
 
 		//printf("Game created\n");
-		uint* bestMovesArr = malloc(height*width * sizeof(uint));
 		
-		int bestMovesCount = solve(boardPtr, maxDepth, bestMovesArr);
+		bestMovesCount = master(boardPtr, maxDepth, bestMovesArr);
+		long long end = wall_clock_time();
+		long long total_time = end - start;
 		retrieveRunResults();
-		saveRunResult(bestMovesArr, bestMovesCount);
+		printMovesArr(bestMovesArr, bestMovesCount, width);
+		saveRunResult(bestMovesArr, bestMovesCount, width, numBoards, comp_time, comm_time, total_time, slaves+1);
 
-		printf("Solved!\n");
-		free(bestMovesArr);
-		freeBoard(boardPtr);
+		//fprintf(stderr,"Solved!\n");
+		//free(bestMovesArr);
+		//freeBoard(boardPtr);
 	}
 	else {
-		fprintf(stderr, " --- Process %d is slave\n", myid);
+		//fprintf(stderr, " --- Process %d is slave\n", myid);
 		slave();
-		fprintf(stderr, " --- Process %d is done\n", myid);
+		//fprintf(stderr, " --- Process %d is done\n", myid);
 		reportRunResult();
 	}
 	MPI_Finalize();
